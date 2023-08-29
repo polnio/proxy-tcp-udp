@@ -1,7 +1,7 @@
 defmodule Proxy.UDP.Upstream do
   alias Proxy.UDP
   require Logger
-  import AddressUtil
+  # import AddressUtil
 
   use GenServer
 
@@ -44,7 +44,7 @@ defmodule Proxy.UDP.Upstream do
       state.upstream_port,
       data
     )
-    Logger.info "UDP: #{ipfmt({state.downstream.host, state.downstream.port})} > #{state.upstream_host}:#{state.upstream_port}\n#{data}"
+    # Logger.info "UDP: #{ipfmt({state.downstream.host, state.downstream.port})} > #{state.upstream_host}:#{state.upstream_port}\n#{data}"
     {:noreply, state}
   end
 

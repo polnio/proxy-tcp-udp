@@ -3,10 +3,10 @@ defmodule Proxy.TCP.Delegate do
   import AddressUtil
 
   def start_proxy_loop(downstream_socket, upstream_socket) do
-    # {:ok, downstream_peer} = :inet.peername(downstream_socket)
-    # {:ok, local} = :inet.sockname(downstream_socket)
-    # {:ok, upstream_peer} = :inet.peername(upstream_socket)
-    # Logger.info "TCP connection: #{ipfmt(downstream_peer)} > #{ipfmt(local)} > #{ipfmt(upstream_peer)}"
+    {:ok, downstream_peer} = :inet.peername(downstream_socket)
+    {:ok, local} = :inet.sockname(downstream_socket)
+    {:ok, upstream_peer} = :inet.peername(upstream_socket)
+    Logger.info "TCP connection: #{ipfmt(downstream_peer)} > #{ipfmt(local)} > #{ipfmt(upstream_peer)}"
     loop_pid = spawn_link(fn ->
       receive do :ready -> :ok end
       :ok = :inet.setopts(downstream_socket, [:binary, packet: 0, active: true, nodelay: true])
@@ -24,9 +24,9 @@ defmodule Proxy.TCP.Delegate do
   end
 
   defp handle_receive({:tcp, socket, data}, ds = %{socket: socket}, us) do
-    {:ok, downstream_peer} = :inet.peername(socket)
-    {:ok, upstream_peer} = :inet.peername(us.socket)
-    Logger.info "TCP data: #{ipfmt(downstream_peer)} > #{ipfmt(upstream_peer)}\n#{data}"
+    # {:ok, downstream_peer} = :inet.peername(socket)
+    # {:ok, upstream_peer} = :inet.peername(us.socket)
+    # Logger.info "TCP data: #{ipfmt(downstream_peer)} > #{ipfmt(upstream_peer)}\n#{data}"
     {:ok, count} = relay_to(us.socket, data)
     proxy_loop(%{ds | amount: ds.amount + count}, us)
   end
@@ -44,9 +44,9 @@ defmodule Proxy.TCP.Delegate do
   end
 
   defp handle_receive({:tcp, socket, data}, ds, us = %{socket: socket}) do
-    {:ok, downstream_peer} = :inet.peername(socket)
-    {:ok, upstream_peer} = :inet.peername(us.socket)
-    Logger.info "TCP data: #{ipfmt(downstream_peer)} < #{ipfmt(upstream_peer)}\n#{data}"
+    # {:ok, downstream_peer} = :inet.peername(socket)
+    # {:ok, upstream_peer} = :inet.peername(us.socket)
+    # Logger.info "TCP data: #{ipfmt(downstream_peer)} < #{ipfmt(upstream_peer)}\n#{data}"
     {:ok, count} = relay_to(ds.socket, data)
     proxy_loop(ds, %{us | amount: us.amount + count})
   end

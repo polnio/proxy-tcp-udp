@@ -45,7 +45,7 @@ defmodule Proxy.UDP do
   end
 
   def handle_cast({:recieve, downstream, data}, %State{listen_socket: socket} = state) do
-    Logger.info "UDP data: #{ipfmt({downstream.host, downstream.port})} < #{state.remote_host}:#{state.remote_port}\n#{data}"
+    # Logger.info "UDP data: #{ipfmt({downstream.host, downstream.port})} < #{state.remote_host}:#{state.remote_port}\n#{data}"
     :ok = :gen_udp.send(socket, downstream.host, downstream.port, data)
     {:noreply, state}
   end
@@ -53,6 +53,7 @@ defmodule Proxy.UDP do
   def handle_info({:udp, _socket, ip, port, data}, %State{} = state) do
     map_key = {ip, port}
     server_pid = self()
+    is_in_client_table = Map.has_key?(state.client_map, map_key)
     client_pid = state.client_map
     |> Map.get_lazy(map_key, fn ->
         server = %{
@@ -63,6 +64,9 @@ defmodule Proxy.UDP do
         {:ok, client_pid} = Upstream.start_link(state.remote_host, state.remote_port, server)
         client_pid
       end)
+    unless is_in_client_table do
+      Logger.info "UDP connection: #{ipfmt({ip, port})} > 127.0.0.1:#{state.listen_port} > #{state.remote_host}:#{state.remote_port}"
+    end
     state = Map.put(
       state,
       :client_map,
