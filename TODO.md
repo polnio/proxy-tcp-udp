@@ -1,0 +1,3 @@
+- Add blacklist and whitelist system
+- Add `on_connection` and `on_message` callbacks
+- Separate dev and prod configs 
