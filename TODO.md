@@ -1,2 +1,1 @@
 - Add blacklist and whitelist system
-- Separate dev and prod configs 
