@@ -7,6 +7,7 @@ defmodule Proxy.TCP do
 
   defmodule State do
     defstruct(
+      id: nil,
       accept_pid: nil,
       client_count: 0,
       client_table: nil,
@@ -14,28 +15,31 @@ defmodule Proxy.TCP do
       listen_socket: nil,
       remote_host: nil,
       opts: [:binary, packet: 0, active: false, reuseaddr: true],
-      max_clients_allowed: 2
+      max_clients_allowed: 2,
+      events: [],
+      global_events: []
     )
   end
 
-  def init([listen_port, remote_host, max_clients, client_table_name]) do
+  @spec init(Keyword.t) :: {:ok, State.t}
+  def init(opts) do
     state = %State{
-      client_table: :ets.new(client_table_name, [:named_table]),
-      listen_port: listen_port,
-      remote_host: remote_host,
-      max_clients_allowed: max_clients
+      id: opts[:id],
+      client_table: :ets.new(opts[:id], [:named_table]),
+      listen_port: opts[:listen_port],
+      remote_host: opts[:remote_host],
+      max_clients_allowed: opts[:max_clients],
+      events: opts[:events],
+      global_events: opts[:global_events]
     }
     {:ok, state}
   end
 
-  def start_link([listen_port, remote_host, max_clients, client_table_name]) do
-    result = GenServer.start_link(
-      __MODULE__,
-      [listen_port, remote_host, max_clients, client_table_name],
-      [])
+  def start_link(opts) do
+    result = GenServer.start_link(__MODULE__, opts, [])
 
     case result do
-      {:ok, server_pid} -> start_listen(server_pid, listen_port)
+      {:ok, server_pid} -> start_listen(server_pid, opts[:listen_port])
       {:error, {:already_started, old_pid}} -> {:ok, old_pid}
       error -> IO.inspect error
     end
@@ -116,18 +120,34 @@ defmodule Proxy.TCP do
     end
   end
 
-  def handle_call({:connect_upstream, downstream_socket}, _from, %State{remote_host: remote_host} = state) do
+  def handle_call({:connect_upstream, downstream_socket}, _from, %State{remote_host: remote_host, id: id, events: events, global_events: global_events} = state) do
     {host, port} = split_host_and_port(remote_host)
-    {:ok, upstream_socket} = initialize_upstream(host, port)
-    {:ok, proxy_loop_pid} = Delegate.start_proxy_loop(
-      downstream_socket,
-      upstream_socket)
-    :gen_tcp.controlling_process(downstream_socket, proxy_loop_pid)
-    :gen_tcp.controlling_process(upstream_socket, proxy_loop_pid)
-    send(proxy_loop_pid, :ready)
-    monitor_ref = Process.monitor(proxy_loop_pid)
-    :ets.insert(state.client_table, {monitor_ref, proxy_loop_pid})
-    {:reply, :ok, state}
+    case initialize_upstream(host, port) do
+      {:ok, upstream_socket} ->
+        {:ok, proxy_loop_pid} = Delegate.start_proxy_loop(
+          downstream_socket,
+          upstream_socket,
+          id,
+          events,
+          global_events
+        )
+        :gen_tcp.controlling_process(downstream_socket, proxy_loop_pid)
+        :gen_tcp.controlling_process(upstream_socket, proxy_loop_pid)
+        send(proxy_loop_pid, :ready)
+        monitor_ref = Process.monitor(proxy_loop_pid)
+        :ets.insert(state.client_table, {monitor_ref, proxy_loop_pid})
+        {:reply, :ok, state}
+      {:error, reason} ->
+        on_global_error = state.global_events[:on_error]
+        if on_global_error != nil do
+          on_global_error.(:tcp, unparse_id(id), reason)
+        end
+        on_error = state.events[:on_error]
+        if on_error != nil do
+          on_error.(:tcp, unparse_id(id), reason)
+        end
+        {:stop, :not_ok, state}
+    end
   end
 
   defp spawn_accept_link(server_pid, listen_socket) do
@@ -159,7 +179,7 @@ defmodule Proxy.TCP do
         case connect_result do
           :ok ->
             :gen_tcp.controlling_process(downstream_socket, server_pid)
-            :ok = GenServer.call(server_pid, {:connect_upstream, downstream_socket})
+            GenServer.call(server_pid, {:connect_upstream, downstream_socket})
           {:error, :max_clients_reached} ->
             :gen_tcp.recv(downstream_socket, 0, 1000)
             :gen_tcp.close(downstream_socket)

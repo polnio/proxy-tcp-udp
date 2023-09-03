@@ -7,6 +7,7 @@ defmodule Proxy.UDP do
 
   defmodule State do
     defstruct(
+      id: nil,
       accept_pid: nil,
       client_count: 0,
       client_table: nil,
@@ -16,26 +17,31 @@ defmodule Proxy.UDP do
       remote_host: nil,
       remote_port: nil,
       opts: [:binary, active: true],
-      max_clients_allowed: 2
+      max_clients_allowed: 2,
+      events: [],
+      global_events: []
     )
   end
 
-  def start_link([listen_port, remote_host, max_clients, client_table_name]) do
-    GenServer.start_link(__MODULE__, [listen_port, remote_host, max_clients, client_table_name])
+  def start_link(opts) do
+    GenServer.start_link(__MODULE__, opts)
   end
 
-  def init([listen_port, remote_host, max_clients, client_table_name]) do
-    {host, port} = split_host_and_port(remote_host)
-    {:ok, socket} = :gen_udp.open(listen_port, [:binary, active: true])
-    Logger.info "UDP: port #{listen_port} => #{remote_host}"
+  def init(opts) do
+    {host, port} = split_host_and_port(opts[:remote_host])
+    {:ok, socket} = :gen_udp.open(opts[:listen_port], [:binary, active: true])
+    Logger.info "UDP: port #{opts[:listen_port]} => #{host}:#{port}"
     state = %State{
-      client_table: :ets.new(client_table_name, [:named_table]),
+      id: opts[:id],
+      client_table: :ets.new(opts[:id], [:named_table]),
       client_map: %{},
-      listen_port: listen_port,
+      listen_port: opts[:listen_port],
       listen_socket: socket,
       remote_host: host,
       remote_port: String.to_integer(port),
-      max_clients_allowed: max_clients
+      max_clients_allowed: opts[:max_clients],
+      events: opts[:events],
+      global_events: opts[:global_events]
     }
     {:ok, state}
   end
@@ -46,6 +52,14 @@ defmodule Proxy.UDP do
 
   def handle_cast({:recieve, downstream, data}, %State{listen_socket: socket} = state) do
     # Logger.info "UDP data: #{ipfmt({downstream.host, downstream.port})} < #{state.remote_host}:#{state.remote_port}\n#{data}"
+    on_global_server_message = state.global_events[:on_server_message]
+    if on_global_server_message != nil do
+      on_global_server_message.(:udp, ipfmt({downstream.host, downstream.port}), unparse_id(state.id), data)
+    end
+    on_server_message = state.events[:on_server_message]
+    if on_server_message != nil do
+      on_server_message.(:udp, ipfmt({downstream.host, downstream.port}), data)
+    end
     :ok = :gen_udp.send(socket, downstream.host, downstream.port, data)
     {:noreply, state}
   end
@@ -61,11 +75,19 @@ defmodule Proxy.UDP do
           host: ip,
           port: port
         }
-        {:ok, client_pid} = Upstream.start_link(state.remote_host, state.remote_port, server)
+        {:ok, client_pid} = Upstream.start_link(state.remote_host, state.remote_port, server, state.id, state.events, state.global_events)
         client_pid
       end)
     unless is_in_client_table do
       Logger.info "UDP connection: #{ipfmt({ip, port})} > 127.0.0.1:#{state.listen_port} > #{state.remote_host}:#{state.remote_port}"
+      on_global_connect = state.global_events[:on_connect]
+      if on_global_connect != nil do
+        on_global_connect.(:udp, ipfmt({ip, port}), unparse_id(state.id))
+      end
+      on_connect = state.events[:on_connect]
+      if on_connect != nil do
+        on_connect.(:udp, ipfmt({ip, port}))
+      end
     end
     state = Map.put(
       state,

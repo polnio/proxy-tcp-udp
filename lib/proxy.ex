@@ -9,32 +9,28 @@ defmodule Proxy do
 
     upstreams = Application.get_env(:proxy, :upstreams, [])
 
-    processes = upstreams
-      |> Enum.map(fn upstream ->
-        id_tcp = parse_name(upstream, :tcp)
-        id_udp = parse_name(upstream, :udp)
-        [
-          Supervisor.child_spec({Proxy.TCP, parse_upstream(upstream, :tcp)}, id: id_tcp),
-          Supervisor.child_spec({Proxy.UDP, parse_upstream(upstream, :udp)}, id: id_udp)
-        ] end)
-      |> Enum.flat_map(& &1)
+    processes = upstreams |> Enum.flat_map(fn upstream ->
+      id_tcp = parse_id(upstream[:id], :tcp)
+      id_udp = parse_id(upstream[:id], :udp)
+      [
+        Supervisor.child_spec({Proxy.TCP, parse_upstream(upstream, :tcp)}, id: id_tcp),
+        Supervisor.child_spec({Proxy.UDP, parse_upstream(upstream, :udp)}, id: id_udp)
+      ]
+    end)
     opts = [strategy: :one_for_one, name: Proxy.Supervisor]
     Supervisor.start_link(processes, opts)
   end
 
+  @spec parse_upstream(Keyword.t, atom) :: Keyword.t
   defp parse_upstream(upstream, mode) do
-    {name, head} = List.pop_at(upstream, -1)
-    new_name = parse_name(name, mode)
-
-    List.insert_at(head, -1, new_name)
+    upstream
+    |> Keyword.replace(:id, parse_id(upstream[:id], mode))
+    |> Keyword.put(:global_events, Application.get_env(:proxy, :events, []))
   end
 
-  defp parse_name([_, _, _, name], mode) do
-    parse_name(name, mode)
-  end
-
-  defp parse_name(name, mode) do
-    name
+  @spec parse_id(atom, atom) :: atom
+  defp parse_id(id, mode) do
+    id
     |> Atom.to_string()
     |> Kernel.<>("_#{Atom.to_string(mode)}")
     |> String.to_atom()

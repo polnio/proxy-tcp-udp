@@ -9,6 +9,18 @@ defmodule AddressUtil do
     parts |> Enum.join(":")
   end
 
+  def join_address(host, port) do
+    "#{host}:#{port}"
+  end
+
+  @spec unparse_id(atom) :: atom
+  def unparse_id(id) do
+    id
+    |> Atom.to_string()
+    |> String.replace(~r/_[^_]+$/, "")
+    |> String.to_atom()
+  end
+
   defp ip_string(addr) do
     parts = Tuple.to_list(addr)
     parts |> Enum.join(".")
