@@ -2,6 +2,7 @@ defmodule Proxy.UDP do
   require Logger
   alias Proxy.UDP.Upstream
   import AddressUtil
+  import FilterListUtil
 
   use GenServer
 
@@ -19,7 +20,9 @@ defmodule Proxy.UDP do
       opts: [:binary, active: true],
       max_clients_allowed: 2,
       events: [],
-      global_events: []
+      global_events: [],
+      whitelist: nil,
+      blacklist: nil
     )
   end
 
@@ -41,7 +44,15 @@ defmodule Proxy.UDP do
       remote_port: String.to_integer(port),
       max_clients_allowed: opts[:max_clients],
       events: opts[:events],
-      global_events: opts[:global_events]
+      global_events: opts[:global_events],
+      whitelist: (if opts[:whitelist] != nil,
+        do: List.flatten(opts[:whitelist], opts[:global_whitelist] || []),
+        else: opts[:global_whitelist]
+      ),
+      blacklist: (if opts[:blacklist] != nil,
+        do: List.flatten(opts[:blacklist], opts[:global_blacklist] || []),
+        else: opts[:global_blacklist]
+      )
     }
     {:ok, state}
   end
@@ -66,36 +77,40 @@ defmodule Proxy.UDP do
 
   def handle_info({:udp, _socket, ip, port, data}, %State{} = state) do
     map_key = {ip, port}
-    server_pid = self()
-    is_in_client_table = Map.has_key?(state.client_map, map_key)
-    client_pid = state.client_map
-    |> Map.get_lazy(map_key, fn ->
-        server = %{
-          pid: server_pid,
-          host: ip,
-          port: port
-        }
-        {:ok, client_pid} = Upstream.start_link(state.remote_host, state.remote_port, server, state.id, state.events, state.global_events)
-        client_pid
-      end)
-    unless is_in_client_table do
-      Logger.info "UDP connection: #{ipfmt({ip, port})} > 127.0.0.1:#{state.listen_port} > #{state.remote_host}:#{state.remote_port}"
-      on_global_connect = state.global_events[:on_connect]
-      if on_global_connect != nil do
-        on_global_connect.(:udp, ipfmt({ip, port}), unparse_id(state.id))
+    if !list_check(ipfmt(map_key), state.whitelist, state.blacklist) do
+      {:noreply, state}
+    else
+      server_pid = self()
+      is_in_client_table = Map.has_key?(state.client_map, map_key)
+      client_pid = state.client_map
+        |> Map.get_lazy(map_key, fn ->
+          server = %{
+            pid: server_pid,
+            host: ip,
+            port: port
+          }
+          {:ok, client_pid} = Upstream.start_link(state.remote_host, state.remote_port, server, state.id, state.events, state.global_events)
+          client_pid
+        end)
+      unless is_in_client_table do
+        Logger.info "UDP connection: #{ipfmt({ip, port})} > 127.0.0.1:#{state.listen_port} > #{state.remote_host}:#{state.remote_port}"
+        on_global_connect = state.global_events[:on_connect]
+        if on_global_connect != nil do
+          on_global_connect.(:udp, ipfmt({ip, port}), unparse_id(state.id))
+        end
+        on_connect = state.events[:on_connect]
+        if on_connect != nil do
+          on_connect.(:udp, ipfmt({ip, port}))
+        end
       end
-      on_connect = state.events[:on_connect]
-      if on_connect != nil do
-        on_connect.(:udp, ipfmt({ip, port}))
-      end
+      state = Map.put(
+        state,
+        :client_map,
+        Map.put(state.client_map, map_key, client_pid)
+      )
+      Upstream.send_data(client_pid, data)
+      {:noreply, state}
     end
-    state = Map.put(
-      state,
-      :client_map,
-      Map.put(state.client_map, map_key, client_pid)
-    )
-    Upstream.send_data(client_pid, data)
-    {:noreply, state}
   end
 
   def handle_info({:udp_passive, _socket}, state) do

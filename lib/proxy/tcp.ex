@@ -17,7 +17,9 @@ defmodule Proxy.TCP do
       opts: [:binary, packet: 0, active: false, reuseaddr: true],
       max_clients_allowed: 2,
       events: [],
-      global_events: []
+      global_events: [],
+      whitelist: nil,
+      blacklist: nil,
     )
   end
 
@@ -30,7 +32,15 @@ defmodule Proxy.TCP do
       remote_host: opts[:remote_host],
       max_clients_allowed: opts[:max_clients],
       events: opts[:events],
-      global_events: opts[:global_events]
+      global_events: opts[:global_events],
+      whitelist: (if opts[:whitelist] != nil,
+        do: List.flatten(opts[:whitelist], opts[:global_whitelist] || []),
+        else: opts[:global_whitelist]
+      ),
+      blacklist: (if opts[:blacklist] != nil,
+        do: List.flatten(opts[:blacklist], opts[:global_blacklist] || []),
+        else: opts[:global_blacklist]
+      )
     }
     {:ok, state}
   end
@@ -120,31 +130,33 @@ defmodule Proxy.TCP do
     end
   end
 
-  def handle_call({:connect_upstream, downstream_socket}, _from, %State{remote_host: remote_host, id: id, events: events, global_events: global_events} = state) do
+  def handle_call({:connect_upstream, downstream_socket}, _from, %State{remote_host: remote_host} = state) do
     {host, port} = split_host_and_port(remote_host)
-    case initialize_upstream(host, port) do
-      {:ok, upstream_socket} ->
-        {:ok, proxy_loop_pid} = Delegate.start_proxy_loop(
-          downstream_socket,
-          upstream_socket,
-          id,
-          events,
-          global_events
-        )
-        :gen_tcp.controlling_process(downstream_socket, proxy_loop_pid)
-        :gen_tcp.controlling_process(upstream_socket, proxy_loop_pid)
-        send(proxy_loop_pid, :ready)
-        monitor_ref = Process.monitor(proxy_loop_pid)
-        :ets.insert(state.client_table, {monitor_ref, proxy_loop_pid})
-        {:reply, :ok, state}
+    with(
+      {:ok, upstream_socket} <- initialize_upstream(host, port),
+      {:ok, proxy_loop_pid} <- Delegate.start_proxy_loop(
+        downstream_socket,
+        upstream_socket,
+        state
+      )
+    ) do
+      :gen_tcp.controlling_process(downstream_socket, proxy_loop_pid)
+      :gen_tcp.controlling_process(upstream_socket, proxy_loop_pid)
+      send(proxy_loop_pid, :ready)
+      monitor_ref = Process.monitor(proxy_loop_pid)
+      :ets.insert(state.client_table, {monitor_ref, proxy_loop_pid})
+      {:reply, :ok, state}
+    else
+      {:error, :unauthorized} ->
+        {:stop, :normal, state}
       {:error, reason} ->
         on_global_error = state.global_events[:on_error]
         if on_global_error != nil do
-          on_global_error.(:tcp, unparse_id(id), reason)
+          on_global_error.(:tcp, unparse_id(state.id), reason)
         end
         on_error = state.events[:on_error]
         if on_error != nil do
-          on_error.(:tcp, unparse_id(id), reason)
+          on_error.(:tcp, unparse_id(state.id), reason)
         end
         {:stop, :not_ok, state}
     end

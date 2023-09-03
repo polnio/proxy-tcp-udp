@@ -17,12 +17,16 @@ The available options are:
       - `:on_client_message`: Called when a client sends a message (function: \[protocol, client, message])
       - `:on_server_message`: Called when a server sends a message (function, \[protocol, client, message])
       - `:on_error`: Called when an error occurs (function: \[protocol, reason])
-- `:events`: The events to listen to (keyword, optionnal),
+    - `whitelist`: A list of whitelisted clients, merged with the global whitelist (array of string | regex)
+    - `blacklist`: A list of blacklisted clients, merged with the global blacklist (array of string | regex)
+- `:events`: The global events to listen to (keyword, optionnal),
   - `:on_connect`: Called when a client connects (function: \[protocol, client, upstream_id])
   - `:on_disconnect`: Called when a client disconnects (function: \[protocol, upstream_id])
   - `:on_client_message`: Called when a client sends a message (function: \[protocol, client, upstream_id, message])
   - `:on_server_message`: Called when a server sends a message (function, \[protocol, client, upstream_id, message])
   - `:on_error`: Called when an error occurs (function: \[protocol, upstream_id, reason])
+- `:whitelist`: A global list of whitelisted clients (array of string | regex)
+- `:blacklist`: A global list of blacklisted clients (array of string | regex)
 
 ## Starting the proxy
 

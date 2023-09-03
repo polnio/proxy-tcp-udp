@@ -12,6 +12,9 @@ proxy1 = [
     on_client_message: fn protocol, client, message ->
       IO.puts "protocol: #{protocol}, client: #{client}, message: #{String.trim(message)}"
     end
+  ],
+  whitelist: [
+    ~r/127\.0\.0\.[1-3]/,
   ]
 ]
 
@@ -19,7 +22,8 @@ proxy2 = [
   id: :proxy2,
   listen_port: 4041,
   remote_host: "localhost:4001",
-  max_clients: 2
+  max_clients: 2,
+  blacklist: ["127.*"]
 ]
 
 global_events = [
@@ -33,5 +37,5 @@ global_events = [
 
 config :proxy,
   upstreams: [ proxy1, proxy2 ],
-  events: global_events
-
+  events: global_events,
+  blacklist: ["127.0.0.1:1000", "localhost:1000"]
